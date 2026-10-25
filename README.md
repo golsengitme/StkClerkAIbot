@@ -1,6 +1,8 @@
 # StkClerkAIbot
 
-AI assistant bot.
+AI assistant for the West Jordan Utah Copper Hills Stake clerk.
+
+The procedures it should answer from are in `docs/stake-clerk-training-manual.md`.
 
 ## Setup
 
