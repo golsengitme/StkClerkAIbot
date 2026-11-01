@@ -26,3 +26,14 @@ htmlcov/
 .idea/
 .cursor/
 .DS_Store
+agent/tests/results/
+
+# AgentCore CLI
+agentcore/.cli/*
+!agentcore/.cli/deployed-state.json
+agentcore/.cache/
+agentcore/.env.local
+node_modules/
+
+# Lambda code backups made by scripts/deploy_site.sh
+aws/clerk_site/backups/

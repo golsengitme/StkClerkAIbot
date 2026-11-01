@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clerk Assistant</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", Palatino, Georgia, serif;
+      background: #f4f1ea;
+      color: #1c1915;
+    }
+    main {
+      max-width: 46rem;
+      margin: 0 auto;
+      padding: 3rem 1.25rem 4rem;
+    }
+    h1 { font-size: 1.8rem; font-weight: 600; margin: 0 0 0.4rem; }
+    p { line-height: 1.45; }
+    .lede { color: #5c564c; margin-top: 0; }
+    form, section { display: grid; gap: 0.75rem; }
+    label { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 0.85rem; }
+    input, textarea, button {
+      font: inherit;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+    input, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #cfc6b8;
+      background: #fff;
+      padding: 0.7rem 0.75rem;
+      border-radius: 6px;
+    }
+    textarea { min-height: 7rem; resize: vertical; }
+    button {
+      justify-self: start;
+      background: #1c1915;
+      color: #f4f1ea;
+      border: 0;
+      border-radius: 6px;
+      padding: 0.65rem 1rem;
+      cursor: pointer;
+    }
+    button.quiet {
+      background: transparent;
+      color: #5c564c;
+      padding-left: 0;
+    }
+    .error { color: #8a2b2b; min-height: 1.2rem; font-family: ui-sans-serif, system-ui, sans-serif; }
+    .answer {
+      background: #fff;
+      border: 1px solid #cfc6b8;
+      border-radius: 6px;
+      padding: 1.15rem 1.3rem 1.35rem;
+      line-height: 1.5;
+    }
+    .answer.pending { white-space: pre-wrap; }
+    .answer h2, .answer h3 {
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .answer h2 {
+      font-size: 1.22rem;
+      margin: 1.55rem 0 0.45rem;
+      padding-top: 0.9rem;
+      border-top: 1px solid #e4dccf;
+    }
+    .answer h2:first-child, .answer h3:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+    .answer h3 { font-size: 1.05rem; margin: 1.2rem 0 0.4rem; }
+    .answer p { margin: 0.55rem 0; }
+    .answer ul, .answer ol { margin: 0.35rem 0 0.85rem; padding-left: 1.25rem; }
+    .answer li { margin: 0.28rem 0; }
+    .answer .table-wrap { overflow-x: auto; margin: 0.8rem 0 1rem; }
+    .answer table {
+      width: 100%;
+      min-width: 34rem;
+      border-collapse: collapse;
+      font-size: 0.98rem;
+    }
+    .answer th, .answer td {
+      padding: 0.55rem 0.85rem 0.55rem 0;
+      border-bottom: 1px solid #e4dccf;
+      vertical-align: top;
+      text-align: left;
+    }
+    .answer th {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #5c564c;
+      border-bottom-color: #cfc6b8;
+    }
+    .answer td:first-child { font-weight: 600; }
+    .answer a { color: inherit; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Clerk Assistant</h1>
+    <p class="lede" id="lede">Enter your PIN.</p>
+
+    <form id="sign-in">
+      <label for="pin">PIN</label>
+      <input id="pin" name="pin" inputmode="numeric" autocomplete="off" required>
+      <button type="submit">Continue</button>
+      <div class="error" id="sign-in-error"></div>
+    </form>
+
+    <section id="ask" hidden>
+      <form id="question-form">
+        <label for="question">Question</label>
+        <textarea id="question" required placeholder="Ask a question."></textarea>
+        <button type="submit">Ask</button>
+      </form>
+      <button class="quiet" id="sign-out" type="button">Sign out</button>
+      <div class="error" id="ask-error"></div>
+      <div class="answer" id="answer" hidden></div>
+      <button id="reask" type="button" hidden>Too vague? Ask again</button>
+    </section>
+  </main>
+  <script>
+    function escapeHtml(value) {
+      return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function formatInline(value) {
+      let text = escapeHtml(value);
+      text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" rel="noopener noreferrer">$1</a>');
+      text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      text = text.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+      return text;
+    }
+
+    function isSeparator(line) {
+      return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+    }
+
+    function splitRow(line) {
+      let row = line.trim();
+      if (row.startsWith("|")) row = row.slice(1);
+      if (row.endsWith("|")) row = row.slice(0, -1);
+      return row.split("|").map((cell) => cell.trim());
+    }
+
+    function isSpecial(line, next) {
+      if (/^#{1,3}\s+/.test(line)) return true;
+      if (/^\s*[-*]\s+/.test(line)) return true;
+      if (/^\s*\d+\.\s+/.test(line)) return true;
+      return line.trim().startsWith("|") && isSeparator(next || "");
+    }
+
+    function renderTable(rows) {
+      const header = splitRow(rows[0]);
+      const body = rows.slice(2).filter((row) => row.trim());
+      const head = "<tr>" + header.map((cell) => `<th>${formatInline(cell)}</th>`).join("") + "</tr>";
+      const data = body.map((row) => {
+        const cells = splitRow(row);
+        return "<tr>" + cells.map((cell) => `<td>${formatInline(cell)}</td>`).join("") + "</tr>";
+      }).join("");
+      return `<div class="table-wrap"><table><thead>${head}</thead><tbody>${data}</tbody></table></div>`;
+    }
+
+    function renderMarkdown(source) {
+      const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
+      const blocks = [];
+      let index = 0;
+      while (index < lines.length) {
+        const line = lines[index];
+        if (!line.trim()) {
+          index += 1;
+          continue;
+        }
+        const heading = line.match(/^(#{1,3})\s+(.*)$/);
+        if (heading) {
+          const tag = heading[1].length >= 3 ? "h3" : "h2";
+          blocks.push(`<${tag}>${formatInline(heading[2])}</${tag}>`);
+          index += 1;
+          continue;
+        }
+        if (line.trim().startsWith("|") && isSeparator(lines[index + 1] || "")) {
+          const rows = [];
+          while (index < lines.length && lines[index].trim().startsWith("|")) {
+            rows.push(lines[index]);
+            index += 1;
+          }
+          blocks.push(renderTable(rows));
+          continue;
+        }
+        if (/^\s*[-*]\s+/.test(line)) {
+          const items = [];
+          while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+            items.push(`<li>${formatInline(lines[index].replace(/^\s*[-*]\s+/, ""))}</li>`);
+            index += 1;
+          }
+          blocks.push(`<ul>${items.join("")}</ul>`);
+          continue;
+        }
+        if (/^\s*\d+\.\s+/.test(line)) {
+          const items = [];
+          while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+            items.push(`<li>${formatInline(lines[index].replace(/^\s*\d+\.\s+/, ""))}</li>`);
+            index += 1;
+          }
+          blocks.push(`<ol>${items.join("")}</ol>`);
+          continue;
+        }
+        const parts = [];
+        while (index < lines.length && lines[index].trim() && !isSpecial(lines[index], lines[index + 1])) {
+          parts.push(lines[index].trim());
+          index += 1;
+        }
+        blocks.push(`<p>${formatInline(parts.join(" "))}</p>`);
+      }
+      return blocks.join("");
+    }
+
+    const signIn = document.querySelector("#sign-in");
+    const ask = document.querySelector("#ask");
+    const signInError = document.querySelector("#sign-in-error");
+    const askError = document.querySelector("#ask-error");
+    const answer = document.querySelector("#answer");
+    const reask = document.querySelector("#reask");
+    const question = document.querySelector("#question");
+    const lede = document.querySelector("#lede");
+    const askButton = document.querySelector("#question-form button[type=submit]");
+    const SIGN_IN_TEXT = "Enter your PIN.";
+
+    function showSignedIn(name) {
+      lede.textContent = name
+        ? `Welcome, ${name}. Ask about clerk work in the Copper Hills Stake.`
+        : "Ask about clerk work in the Copper Hills Stake.";
+      signIn.hidden = true;
+      ask.hidden = false;
+      question.focus();
+    }
+
+    function showSignedOut() {
+      lede.textContent = SIGN_IN_TEXT;
+      ask.hidden = true;
+      signIn.hidden = false;
+      answer.hidden = true;
+      answer.textContent = "";
+      delete answer.dataset.source;
+      reask.hidden = true;
+      askError.textContent = "";
+    }
+
+    (async () => {
+      try {
+        const response = await fetch("/api/me");
+        const payload = await response.json();
+        if (payload.signedIn) showSignedIn(payload.name);
+      } catch (error) {
+        // stay on the sign-in form
+      }
+    })();
+
+    signIn.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      signInError.textContent = "";
+      const pin = new FormData(signIn).get("pin");
+      const response = await fetch("/api/sign-in", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        signInError.textContent = payload.error || "Try again.";
+        return;
+      }
+      signIn.reset();
+      showSignedIn(payload.name);
+    });
+
+    document.querySelector("#sign-out").addEventListener("click", async () => {
+      await fetch("/api/sign-out", { method: "POST" });
+      showSignedOut();
+    });
+
+    document.querySelector("#question-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      sendQuestion(false);
+    });
+
+    question.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        if (!askButton.disabled) sendQuestion(false);
+      }
+    });
+
+    reask.addEventListener("click", () => {
+      sendQuestion(true);
+    });
+
+    async function sendQuestion(vague) {
+      if (askButton.disabled) return;
+      askButton.disabled = true;
+      reask.disabled = true;
+      try {
+        await sendQuestionNow(vague);
+      } catch (error) {
+        askError.textContent = "Something went wrong on our end. Press Ask to try again.";
+        answer.hidden = true;
+      } finally {
+        askButton.disabled = false;
+        reask.disabled = false;
+      }
+    }
+
+    async function sendQuestionNow(vague) {
+      askError.textContent = "";
+      reask.hidden = true;
+      const text = question.value;
+      const body = { question: text };
+      if (vague) {
+        body.vague = true;
+        body.previousAnswer = answer.dataset.source || answer.textContent;
+      }
+      answer.hidden = false;
+      const response = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        if (response.status === 401) {
+          showSignedOut();
+          signInError.textContent = payload.error || "Sign in again.";
+          return;
+        }
+        askError.textContent = payload.error || "Try again.";
+        answer.hidden = true;
+        return;
+      }
+      showStatus("Working on it…");
+      await poll(payload.id);
+    }
+
+    function showStatus(text) {
+      delete answer.dataset.source;
+      answer.classList.add("pending");
+      answer.hidden = false;
+      answer.textContent = text;
+    }
+
+    function showAnswer(markdown) {
+      answer.dataset.source = markdown;
+      answer.classList.remove("pending");
+      answer.hidden = false;
+      answer.innerHTML = renderMarkdown(markdown);
+    }
+
+    async function poll(id) {
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        const response = await fetch("/api/ask/" + id);
+        const payload = await response.json();
+        if (!response.ok) {
+          askError.textContent = payload.error || "Try again.";
+          return;
+        }
+        if (payload.status === "FINISHED") {
+          showAnswer(payload.answer || "No answer came back.");
+          reask.hidden = false;
+          return;
+        }
+        if (payload.status === "ERROR" || payload.status === "CANCELLED" || payload.status === "EXPIRED") {
+          answer.hidden = true;
+          askError.textContent = "Something went wrong on our end. Press Ask to try again.";
+          return;
+        }
+      }
+      showStatus("Still working. Ask again in a minute if nothing appears.");
+    }
+  </script>
+</body>
+</html>

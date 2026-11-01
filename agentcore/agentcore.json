@@ -1,0 +1,16 @@
+{
+  "name": "stkclerk",
+  "version": 2,
+  "managedBy": "CDK",
+  "runtimes": [
+    {
+      "name": "clerk",
+      "build": "CodeZip",
+      "modelProvider": "Bedrock",
+      "entrypoint": "clerk_agent.py",
+      "codeLocation": "agent",
+      "runtimeVersion": "PYTHON_3_14",
+      "protocol": "HTTP"
+    }
+  ]
+}
