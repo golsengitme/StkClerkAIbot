@@ -158,7 +158,11 @@
         "doesn't address",
         "does not address",
         "doesn't include",
-        "not in the manual"
+        "not in the manual",
+        "outside what",
+        "outside the",
+        "isn't something",
+        "is not something"
       ]
     ]
   },
@@ -176,7 +180,11 @@
         "doesn't address",
         "does not address",
         "doesn't include",
-        "not in the manual"
+        "not in the manual",
+        "outside what",
+        "outside the",
+        "isn't something",
+        "is not something"
       ]
     ],
     "must_not_include": [

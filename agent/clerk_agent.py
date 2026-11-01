@@ -86,16 +86,33 @@ ASKER_FIELDS = ("byTitle", "firstName", "rapport")
 
 GARY = re.compile(r"\bgary\b", re.IGNORECASE)
 
+# Topics where the Gary humor is switched off. The agent also uses its own judgment;
+# this list makes the common cases certain. Add terms here as needed.
+SENSITIVE = re.compile(
+    r"membership council|disciplin|withdraw|excommunicat|confidential|abuse|"
+    r"tithing (?:record|amount|statement)|donation (?:record|amount)|"
+    r"health|medical|illness|hospital|divorce|suicid|death|died|passed away|funeral|"
+    r"addiction|arrest|police|court",
+    re.IGNORECASE,
+)
+
 
 def _asker_block(asker: dict | None, question: str = "") -> str:
     """Per-request context: who is asking (from AllowedPhones) and whether they mentioned Gary."""
     lines = []
     if isinstance(asker, dict):
-        for field in ASKER_FIELDS:
-            value = " ".join(str(asker.get(field) or "").split())[:60]
+        fields = {f: " ".join(str(asker.get(f) or "").split())[:60] for f in ASKER_FIELDS}
+        for field, value in fields.items():
             if value:
                 lines.append(f"{field}: {value}")
+        if fields["rapport"].lower() == "friend":
+            address = fields["firstName"] or fields["byTitle"]
+        else:
+            address = fields["byTitle"] or fields["firstName"]
+        if address:
+            lines.append(f"addressAs: {address}")
     lines.append(f"mentionsGary: {'yes' if GARY.search(question) else 'no'}")
+    lines.append(f"sensitiveTopic: {'yes' if SENSITIVE.search(question) else 'no'}")
     return "<asker>\n" + "\n".join(lines) + "\n</asker>\n\n"
 
 
